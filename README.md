@@ -50,6 +50,7 @@ git clone https://github.com/forrest1988/pyGenomeTracks.git
 cd pyGenomeTracks
 python -m pip install -r requirements.txt
 python -m pip install pybigwig        # needed because BedGraphTrack imports pyBigWig
+python -m pip install scipy           # required for hierarchical clustering
 python -m pip install -e .            # editable install to pick up the custom track
 ```
 
@@ -64,6 +65,13 @@ python prepare_enrichment_heatmap.py \
   -o exampleInputData/enrichment_heatmap.tsv
 ```
 
+Additional prepare_enrichment_heatmap.py options:
+
+- `--dataType`: `enrichment` (default), `wgbs01`, `wgbs0100`. WGBS modes force single-base output, keep NaNs for non-CpG context, and for `wgbs0100` values are scaled to 0–100.
+- `--nan-to-zero`: replace NaNs with 0 (leave off for WGBS so NaNs render as grey).
+- Sorting: `--sort-by` supports `input`, `mean_desc/asc`, `max_desc/asc`, `min_desc/asc`, `metadata:<column>`.
+- Metadata: `--metadata` to attach columns by sample name; `--sample-labels` to override labels.
+
 Example ini file content with the enrichment heatmap panel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -72,11 +80,19 @@ Example ini file content with the enrichment heatmap panel
 file = /Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_heatmap.tsv
 file_type = enrichment_heatmap
 title = Enrichment across samples
-sort_by = mean_desc
+sortRegions = descend
+sortUsing = mean
 labels = false
 show_colorbar = true
 height = 5
 colormap = Blues
+clustering = none        # none, hclust, kmeans
+clusterNumber = 3        # used when clustering != none
+outFileSortedSamples = none
+outFileNameMatrix = none
+zMin = auto
+zMax = auto
+dataType = enrichment    # enrichment, wgbs01, wgbs0100
 
 [spacer]
 # this simply adds an small space between the two tracks.

@@ -12,7 +12,8 @@ import pyBigWig
 
 
 class CustomFormatter(logging.Formatter):
-    grey = "\x1b[38;20m"
+
+    grey = "\x1b[38;20m"  # test how it looks in bash with e.g.: echo -e "\x1b[34;20m text\e[0m"
     yellow = "\x1b[33;20m"
     blue = "\x1b[34;20m"
     pink = "\x1b[35;20m"
@@ -52,6 +53,17 @@ def configureLogging(analysisPrefix=(os.path.basename(__file__)).replace(".py", 
     lgrPlainFormat = logging.Formatter('###\t[%(asctime)s] %(filename)s:%(lineno)d: %(name)s %(levelname)s: %(message)s')
     filehdlr.setFormatter(lgrPlainFormat)
     streamhdlr.setFormatter(CustomFormatter())
+
+
+def str2bool(v):
+    lgr = logging.getLogger(inspect.currentframe().f_code.co_name)
+    if str(v).lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif str(v).lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        lgr.critical("Unrecognized parameter was set for '{}'. Program was aborted.".format(v))
+        exit()
 
 
 def parse_region(region_string: str) -> Tuple[str, int, int]:
@@ -95,13 +107,13 @@ def parseArgs():
     command_used = ' '.join(shlex.quote(arg) for arg in [os.path.basename(executable)] + argv)
     lgr.info("Command used to run script: {}".format(command_used))
 
+    # for each argument, log its value:
     lgr.info("Region (-r flag): {}".format(args.region))
     lgr.info("Output (--output flag): {}".format(args.output))
     lgr.info("Bin size (--bin-size flag): {}".format(args.bin_size))
     lgr.info("Number of bins (--number-of-bins flag): {}".format(args.number_of_bins))
     lgr.info("Summary method (--summary-method flag): {}".format(args.summary_method))
     lgr.info("Sort (--sort-by flag): {}".format(args.sort_by))
-    lgr.info("dataType (--dataType flag): {}".format(args.dataType))
 
     if args.dataType == "enrichment":
         if args.bin_size is None and args.number_of_bins is None:
@@ -109,7 +121,7 @@ def parseArgs():
         if args.bin_size is not None and args.number_of_bins is not None:
             parser.error("Use only one of --bin-size or --number-of-bins.")
     else:
-        # wgbs modes ignore binning options
+        # force base-level values for wgbs
         args.bin_size = None
         args.number_of_bins = None
 
@@ -122,6 +134,9 @@ def parseArgs():
 
 
 def load_metadata(metadata_path: Optional[str]) -> Tuple[Dict[str, Dict[str, str]], List[str]]:
+    """
+    Returns a mapping sample_name -> metadata dict and an ordered list of metadata field names.
+    """
     if metadata_path is None:
         return {}, []
     opener = gzip.open if metadata_path.endswith(".gz") else open
@@ -165,6 +180,7 @@ def compute_bin_edges(start: int, end: int, bin_size: Optional[int], number_of_b
 def summarize_bigwig(path: str, chrom: str, start: int, end: int, n_bins: int, summary_method: str) -> List[float]:
     with pyBigWig.open(path) as bw:
         stats = bw.stats(chrom, start, end, nBins=n_bins, type=summary_method)
+    # pyBigWig returns None for empty bins
     return [np.nan if v is None else float(v) for v in stats]
 
 
@@ -175,6 +191,9 @@ def extract_wgbs_values(path: str, chrom: str, start: int, end: int) -> List[flo
 
 
 def sort_rows(matrix: np.ndarray, sort_by: str, labels: List[str], metadata: List[Dict[str, str]]):
+    """
+    Sort matrix rows in-place, returning updated (matrix, labels, metadata).
+    """
     sort_by = sort_by.lower()
     if sort_by == "input":
         return matrix, labels, metadata
@@ -182,18 +201,19 @@ def sort_rows(matrix: np.ndarray, sort_by: str, labels: List[str], metadata: Lis
     reverse = sort_by.endswith("desc")
     if sort_by.startswith("metadata:"):
         field = sort_by.split("metadata:", 1)[1]
+        if field == "":
+            return matrix, labels, metadata
 
         def key_fn(idx):
             return metadata[idx].get(field, "")
     else:
+        axis = 1
         if sort_by.startswith("mean"):
-            key_values = np.nanmean(matrix, axis=1)
+            key_values = np.nanmean(matrix, axis=axis)
         elif sort_by.startswith("max"):
-            key_values = np.nanmax(matrix, axis=1)
-        elif sort_by.startswith("min"):
-            key_values = np.nanmin(matrix, axis=1)
+            key_values = np.nanmax(matrix, axis=axis)
         else:
-            key_values = np.nanmean(matrix, axis=1)
+            return matrix, labels, metadata
 
         def key_fn(idx):
             return key_values[idx]
@@ -215,6 +235,7 @@ def main():
         bin_edges = compute_bin_edges(start, end, args.bin_size, args.number_of_bins)
         n_bins = len(bin_edges) - 1
     else:
+        # base resolution
         bin_edges = np.arange(start, end + 1, dtype=int)
         n_bins = len(bin_edges) - 1
 
@@ -232,7 +253,7 @@ def main():
         else:
             values = extract_wgbs_values(bw_path, chrom, start, end)
             if args.dataType == "wgbs0100":
-                values = [np.nan if np.isnan(v) else v for v in [v * 100 if v is not None else np.nan for v in values]]
+                values = [np.nan if np.isnan(v) else v * 100 for v in values]
         rows.append(values)
         labels.append(sample_name)
         row_metadata.append(metadata_map.get(sample_name, {}))

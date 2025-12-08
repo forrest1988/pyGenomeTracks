@@ -1,10 +1,13 @@
 from . GenomeTrack import GenomeTrack
 import numpy as np
 import matplotlib.cm as cm
+from matplotlib import colors as mcolors
 import gzip
 from .. utilities import InputError
 
 DEFAULT_COLORMAP = 'viridis'
+WGBS_BAD_COLOR = '#c0c5ce'
+WGBS_COLORS = ['#fbcb5a', '#000000']
 
 
 class EnrichmentHeatmapTrack(GenomeTrack):
@@ -19,45 +22,79 @@ colormap = {DEFAULT_COLORMAP}
 # if min/max are not set, they are inferred from the matrix
 #min_value = auto
 #max_value = auto
-# sort rows when plotting. Options: input, mean_desc, mean_asc, max_desc, max_asc, metadata:<column>
-sort_by = mean_desc
+# sort rows when plotting. Options: descend, ascend, keep/no
+# sortRegions selects direction, sortUsing picks the statistic
+sortRegions = descend
+# sortUsing options: mean, median, max, min, sum, region_length
+sortUsing = mean
 # show sample labels on the y axis (turn off for thousands of rows)
 labels = true
 # if labels are shown, optionally override their fontsize
 #label_fontsize = 6
 # rasterize image to keep PDF/SVG small
 rasterize = true
-# convert NaNs to zero before plotting
+# convert NaNs to zero before plotting (not recommended for wgbs modes)
 nans_to_zeros = false
 # show a colorbar next to the heatmap
 show_colorbar = true
+# clustering: none, hclust, kmeans
+clustering = none
+# number of clusters (used when clustering != none)
+clusterNumber = 3
+# optional: write sorted samples to file (set to a path), set to none to disable
+outFileSortedSamples = none
+# optional: write matrix used for plotting to file (set to a path), set to none to disable
+outFileNameMatrix = none
+# zMin/zMax mimic deepTools auto behaviour: auto uses 1st/98th percentile
+zMin = auto
+zMax = auto
+# dataType: enrichment (default), wgbs01 (0-1), wgbs0100 (0-100)
+dataType = enrichment
     """
 
-    DEFAULTS_PROPERTIES = {'min_value': None,
-                           'max_value': None,
+    DEFAULTS_PROPERTIES = {'min_value': None,  # deprecated in favor of zMin
+                           'max_value': None,  # deprecated in favor of zMax
                            'colormap': DEFAULT_COLORMAP,
-                           'sort_by': 'mean_desc',
+                           'sortRegions': 'descend',
+                           'sortUsing': 'mean',
                            'labels': True,
                            'label_fontsize': None,
                            'rasterize': True,
                            'nans_to_zeros': False,
                            'show_colorbar': True,
-                           'orientation': None}
+                           'orientation': None,
+                           'clustering': 'none',
+                           'clusterNumber': 3,
+                           'outFileSortedSamples': 'none',
+                           'outFileNameMatrix': 'none',
+                           'zMin': 'auto',
+                           'zMax': 'auto',
+                           'dataType': 'enrichment'}
     NECESSARY_PROPERTIES = ['file']
     SYNONYMOUS_PROPERTIES = {'max_value': {'auto': None},
-                             'min_value': {'auto': None}}
-    POSSIBLE_PROPERTIES = {'sort_by': ['input', 'mean_desc', 'mean_asc',
-                                       'max_desc', 'max_asc'],
-                           'orientation': [None, 'inverted']}
+                             'min_value': {'auto': None},
+                             'sortRegions': {'no': 'keep'}}
+    POSSIBLE_PROPERTIES = {'sortRegions': ['descend', 'ascend', 'keep', 'no'],
+                           'sortUsing': ['mean', 'median', 'max', 'min', 'sum', 'region_length'],
+                           'orientation': [None, 'inverted'],
+                           'clustering': ['none', 'hclust', 'kmeans'],
+                           'dataType': ['enrichment', 'wgbs01', 'wgbs0100']}
     BOOLEAN_PROPERTIES = ['labels', 'rasterize', 'nans_to_zeros',
                           'show_colorbar']
     STRING_PROPERTIES = ['file', 'file_type', 'overlay_previous',
-                         'title', 'colormap', 'sort_by', 'orientation']
+                         'title', 'colormap', 'sortRegions', 'sortUsing',
+                         'orientation', 'clustering', 'outFileSortedSamples',
+                         'outFileNameMatrix', 'zMin', 'zMax', 'dataType',
+                         # lowercase variants (configparser lowercases keys)
+                         'sortregions', 'sortusing',
+                         'outfilesortedsamples', 'outfilenamematrix',
+                         'zmin', 'zmax', 'datatype']
     FLOAT_PROPERTIES = {'max_value': [- np.inf, np.inf],
                         'min_value': [- np.inf, np.inf],
                         'label_fontsize': [0, np.inf],
                         'height': [0, np.inf]}
-    INTEGER_PROPERTIES = {}
+    INTEGER_PROPERTIES = {'clusterNumber': [1, np.inf],
+                          'clusternumber': [1, np.inf]}
 
     def __init__(self, properties_dict):
         GenomeTrack.__init__(self, properties_dict)
@@ -67,19 +104,46 @@ show_colorbar = true
         self.metadata_rows = []
         self.matrix = None
         self.chrom_from_file = None
+        self.cluster_boundaries = []
         self._load_matrix()
 
     def set_properties_defaults(self):
-        if ('sort_by' in self.properties
-                and isinstance(self.properties['sort_by'], str)
-                and self.properties['sort_by'].startswith('metadata:')
-                and self.properties['sort_by'] not in self.POSSIBLE_PROPERTIES['sort_by']):
-            # allow arbitrary metadata sort key
-            self.POSSIBLE_PROPERTIES['sort_by'] = self.POSSIBLE_PROPERTIES['sort_by'] + [self.properties['sort_by']]
+        # Normalize lowercase keys from configparser
+        self._normalize_keys()
+        # allow arbitrary metadata: columns
+        if ('sortUsing' in self.properties and isinstance(self.properties['sortUsing'], str)
+                and self.properties['sortUsing'].startswith('metadata:')
+                and self.properties['sortUsing'] not in self.POSSIBLE_PROPERTIES['sortUsing']):
+            self.POSSIBLE_PROPERTIES['sortUsing'] = self.POSSIBLE_PROPERTIES['sortUsing'] + [self.properties['sortUsing']]
         GenomeTrack.set_properties_defaults(self)
+        if self.properties['dataType'].startswith('wgbs') and self.properties['nans_to_zeros']:
+            self.log.warning("nans_to_zeros is disabled for wgbs dataType to preserve missing-context NaNs.")
+            self.properties['nans_to_zeros'] = False
         self.process_color('colormap', colormap_possible=True,
                            colormap_only=True, default_value_is_colormap=True)
         self.cmap = cm.get_cmap(self.properties['colormap'])
+
+    def _normalize_keys(self):
+        mapping = {
+            'sortregions': 'sortRegions',
+            'sortusing': 'sortUsing',
+            'clustering': 'clustering',
+            'clusternumber': 'clusterNumber',
+            'outfilesortedsamples': 'outFileSortedSamples',
+            'outfilenamematrix': 'outFileNameMatrix',
+            'zmin': 'zMin',
+            'zmax': 'zMax',
+            'datatype': 'dataType'
+        }
+        synonyms = {'ascending': 'ascend', 'descending': 'descend'}
+        for low, proper in mapping.items():
+            if low in self.properties and proper not in self.properties:
+                self.properties[proper] = self.properties[low]
+        # apply synonyms for sortRegions
+        if 'sortRegions' in self.properties:
+            val = str(self.properties['sortRegions']).lower()
+            if val in synonyms:
+                self.properties['sortRegions'] = synonyms[val]
 
     @staticmethod
     def _open_file(path):
@@ -142,7 +206,7 @@ show_colorbar = true
             self.matrix = np.nan_to_num(self.matrix, nan=0.0)
 
         self.matrix, self.sample_labels, self.metadata_rows = \
-            self._sort_rows(self.matrix, self.sample_labels, self.metadata_rows)
+            self._sort_and_cluster(self.matrix, self.sample_labels, self.metadata_rows)
 
         # bin edges and chrom info (if provided)
         if 'bin_edges' in comments:
@@ -169,27 +233,124 @@ show_colorbar = true
         if self.bin_edges is None:
             self.bin_edges = np.arange(0, self.matrix.shape[1] + 1)
 
-    def _sort_rows(self, matrix, labels, metadata_rows):
-        sort_by = self.properties['sort_by']
-        reverse = sort_by.endswith('desc')
-        if sort_by == 'input':
-            return matrix, labels, metadata_rows
+    def _get_sort_values(self, matrix, metadata_rows):
+        method = self.properties['sortUsing']
+        if method.startswith('metadata:'):
+            field = method.split('metadata:', 1)[1]
+            return np.array([row.get(field, "") for row in metadata_rows])
+        if method == 'mean':
+            return np.nanmean(matrix, axis=1)
+        if method == 'median':
+            return np.nanmedian(matrix, axis=1)
+        if method == 'max':
+            return np.nanmax(matrix, axis=1)
+        if method == 'min':
+            return np.nanmin(matrix, axis=1)
+        if method == 'sum':
+            return np.nansum(matrix, axis=1)
+        if method == 'region_length' and self.bin_edges is not None:
+            return np.array([self.bin_edges[-1] - self.bin_edges[0]] * matrix.shape[0])
+        return np.nanmean(matrix, axis=1)
 
-        order = list(range(matrix.shape[0]))
-        if sort_by.startswith('metadata:'):
-            field = sort_by.split("metadata:", 1)[1]
-            order = sorted(order, key=lambda i: metadata_rows[i].get(field, ""), reverse=reverse)
-        elif sort_by.startswith('mean'):
-            mean_vals = np.nanmean(matrix, axis=1)
-            order = sorted(order, key=lambda i: mean_vals[i], reverse=reverse)
-        elif sort_by.startswith('max'):
-            max_vals = np.nanmax(matrix, axis=1)
-            order = sorted(order, key=lambda i: max_vals[i], reverse=reverse)
-
+    def _sort_and_cluster(self, matrix, labels, metadata_rows):
+        sort_dir = self.properties['sortRegions']
+        reverse = sort_dir == 'descend'
+        if sort_dir in ['keep', 'no']:
+            order = list(range(matrix.shape[0]))
+        else:
+            sort_vals = self._get_sort_values(matrix, metadata_rows)
+            order = sorted(range(matrix.shape[0]),
+                           key=lambda i: sort_vals[i],
+                           reverse=reverse)
         matrix = matrix[order, :]
         labels = [labels[i] for i in order]
         metadata_rows = [metadata_rows[i] for i in order]
+
+        clustering = self.properties['clustering']
+        self.cluster_boundaries = []
+        if clustering != 'none':
+            cluster_num = int(self.properties.get('clusterNumber', 3))
+            matrix, labels, metadata_rows = self._cluster(matrix, labels, metadata_rows, clustering, cluster_num)
+        self._write_outputs(matrix, labels, metadata_rows)
         return matrix, labels, metadata_rows
+
+    def _cluster(self, matrix, labels, metadata_rows, mode, k):
+        data = np.array(matrix, copy=True)
+        col_means = np.nanmean(data, axis=0)
+        data = np.where(np.isnan(data), col_means, data)
+        if mode == 'kmeans':
+            order, assignments = self._kmeans_order(data, k)
+        else:
+            order, assignments = self._hclust_order(data, k)
+        matrix = matrix[order, :]
+        labels = [labels[i] for i in order]
+        metadata_rows = [metadata_rows[i] for i in order]
+        ordered_assign = assignments[order]
+        self.cluster_boundaries = []
+        for idx in range(1, len(ordered_assign)):
+            if ordered_assign[idx] != ordered_assign[idx - 1]:
+                self.cluster_boundaries.append(idx)
+        self.cluster_assignments = ordered_assign
+        return matrix, labels, metadata_rows
+
+    def _kmeans_order(self, data, k, max_iter=100):
+        rng = np.random.default_rng(0)
+        idx = rng.choice(data.shape[0], size=min(k, data.shape[0]), replace=False)
+        centroids = data[idx]
+        assignments = np.zeros(data.shape[0], dtype=int)
+        for _ in range(max_iter):
+            dists = np.linalg.norm(data[:, None, :] - centroids[None, :, :], axis=2)
+            new_assignments = np.argmin(dists, axis=1)
+            if np.array_equal(assignments, new_assignments):
+                break
+            assignments = new_assignments
+            for i in range(k):
+                members = data[assignments == i]
+                if len(members) > 0:
+                    centroids[i] = members.mean(axis=0)
+        # order by cluster id preserving within-cluster order
+        order = []
+        flat_assign = assignments.tolist()
+        for cid in range(k):
+            order.extend([i for i, c in enumerate(flat_assign) if c == cid])
+        return order, assignments + 1
+
+    def _hclust_order(self, data, k):
+        try:
+            from scipy.cluster.hierarchy import linkage, fcluster, dendrogram
+            from scipy.spatial.distance import pdist
+        except Exception as e:
+            raise InputError(f"clustering requires scipy: {e}")
+        if data.shape[0] == 1:
+            return list(range(data.shape[0])), np.array([1])
+        Z = linkage(pdist(data), method='ward')
+        labels = fcluster(Z, t=k, criterion='maxclust')
+        leaves = dendrogram(Z, no_plot=True)['leaves']
+        # reorder leaves by cluster label then by dendrogram order
+        cluster_order = sorted(set(labels))
+        order = []
+        for cid in cluster_order:
+            order.extend([i for i in leaves if labels[i] == cid])
+        return order, labels
+
+    def _write_outputs(self, matrix, labels, metadata_rows):
+        # write sorted samples if requested
+        out_samples = self.properties.get('outFileSortedSamples', 'none')
+        out_matrix = self.properties.get('outFileNameMatrix', 'none')
+        if out_samples and str(out_samples).lower() != 'none':
+            with open(out_samples, 'w') as handle:
+                handle.write("sample\tcluster\n")
+                for idx, name in enumerate(labels):
+                    cluster_id = int(self.cluster_assignments[idx]) if hasattr(self, 'cluster_assignments') else 1
+                    handle.write(f"{name}\t{cluster_id}\n")
+        if out_matrix and str(out_matrix).lower() != 'none':
+            header = ["sample"] + self.metadata_fields + [f"bin_{i:05d}" for i in range(matrix.shape[1])]
+            with open(out_matrix, 'w') as handle:
+                handle.write("\t".join(header) + "\n")
+                for i, name in enumerate(labels):
+                    meta_vals = [metadata_rows[i].get(field, "") for field in self.metadata_fields]
+                    row_vals = ["" if np.isnan(v) else f"{v:.6g}" for v in matrix[i]]
+                    handle.write("\t".join([name] + meta_vals + row_vals) + "\n")
 
     def plot(self, ax, chrom_region, start_region, end_region):
         if self.matrix is None or self.matrix.size == 0:
@@ -210,24 +371,90 @@ show_colorbar = true
             x_edges = np.linspace(start_region, end_region, num=data.shape[1] + 1)
 
         y_edges = np.arange(0, data.shape[0] + 1)
-        self.last_img_plotted = ax.pcolormesh(x_edges, y_edges, data,
-                                              cmap=self.cmap,
-                                              vmin=self.properties['min_value'],
-                                              vmax=self.properties['max_value'],
+        cmap, vmin, vmax = self._get_cmap_and_range(data)
+        if self.properties.get('dataType', 'enrichment').startswith('wgbs'):
+            data_to_plot = np.ma.masked_invalid(data)
+        else:
+            data_to_plot = data
+        self.last_img_plotted = ax.pcolormesh(x_edges, y_edges, data_to_plot,
+                                              cmap=cmap,
+                                              vmin=vmin,
+                                              vmax=vmax,
                                               shading='auto')
         if self.properties['rasterize']:
             self.last_img_plotted.set_rasterized(True)
         ax.set_xlim(x_edges[0], x_edges[-1])
         ax.set_ylim(0, data.shape[0])
-        if self.properties['labels'] and data.shape[0] <= 200:
+        if self.properties['labels']:
             ax.set_yticks(np.arange(0.5, data.shape[0] + 0.5))
             fontsize = self.properties['label_fontsize']
             fontsize = fontsize if fontsize is not None else 'small'
             ax.set_yticklabels(labels, fontsize=fontsize)
+            ax.tick_params(axis='y', which='both', left=True, labelleft=True, length=2)
         else:
             ax.set_yticks([])
         ax.set_xticks([])
+        for boundary in self.cluster_boundaries:
+            ax.axhline(boundary, color='white', linewidth=1)
 
     def plot_y_axis(self, ax, plot_axis):
         if self.properties['show_colorbar']:
             GenomeTrack.plot_custom_cobar(self, ax)
+
+    def _get_cmap_and_range(self, data):
+        data_type = self.properties.get('dataType', 'enrichment')
+        vmin = self.properties.get('min_value', None)
+        vmax = self.properties.get('max_value', None)
+        zmin_prop = self.properties.get('zMin', 'auto')
+        zmax_prop = self.properties.get('zMax', 'auto')
+
+        if data_type.startswith('wgbs'):
+            cmap = mcolors.LinearSegmentedColormap.from_list('wgbs', WGBS_COLORS)
+            cmap.set_bad(WGBS_BAD_COLOR)
+            if zmin_prop == 'auto':
+                vmin = 0
+            else:
+                try:
+                    vmin = float(zmin_prop)
+                except Exception:
+                    vmin = 0
+            if zmax_prop == 'auto':
+                vmax = 1 if data_type == 'wgbs01' else 100
+            else:
+                try:
+                    vmax = float(zmax_prop)
+                except Exception:
+                    vmax = 1 if data_type == 'wgbs01' else 100
+        else:
+            cmap = self.cmap
+            vmin = self._coerce_z_value(zmin_prop, data, fallback=self.properties.get('min_value'))
+            vmax = self._coerce_z_value(zmax_prop, data, fallback=self.properties.get('max_value'), upper=True)
+        return cmap, vmin, vmax
+
+    @staticmethod
+    def _coerce_z_value(val, data, fallback=None, upper=False):
+        if val is None:
+            return fallback
+        if isinstance(val, (int, float)):
+            return val
+        if isinstance(val, str):
+            sval = val.strip()
+            if sval.lower() == 'auto':
+                try:
+                    candidate = float(np.nanmax(data)) if upper else float(np.nanmin(data))
+                    if np.isnan(candidate):
+                        raise ValueError("nan percentile")
+                    return candidate
+                except Exception:
+                    try:
+                        return float(np.nanmax(data)) if upper else float(np.nanmin(data))
+                    except Exception:
+                        return fallback
+            try:
+                return float(sval)
+            except Exception:
+                return fallback
+        try:
+            return float(val)
+        except Exception:
+            return fallback
