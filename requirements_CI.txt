@@ -22,3 +22,5 @@ flake8
 # For local test and coverage
 coverage
 coverage-badge
+# For enrichment heatmap
+pybigwig >=0.3.24

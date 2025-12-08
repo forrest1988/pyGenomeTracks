@@ -38,6 +38,82 @@ Table of content
 
 * [Installation](#installation)
 * [Usage](#usage)
+
+Custom enrichment heatmap track
+--------------------------------
+
+Install the modified version
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+```
+git clone https://github.com/forrest1988/pyGenomeTracks.git
+cd pyGenomeTracks
+python -m pip install -r requirements.txt
+python -m pip install pybigwig        # needed because BedGraphTrack imports pyBigWig
+python -m pip install -e .            # editable install to pick up the custom track
+```
+
+Preparing the files for enrichment heatmap figure panel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+```
+python prepare_enrichment_heatmap.py \
+  -b exampleInputData/ENCFF333FOR.bigWig exampleInputData/ENCFF880RHG.bigWig \
+  -r chr12:6,527,080-6,544,719 \
+  --number-of-bins 200 \
+  -o exampleInputData/enrichment_heatmap.tsv
+```
+
+Example ini file content with the enrichment heatmap panel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+```
+[EnrichmentHeatmap]
+file = /Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_heatmap.tsv
+file_type = enrichment_heatmap
+title = Enrichment across samples
+sort_by = mean_desc
+labels = false
+show_colorbar = true
+height = 5
+colormap = Blues
+
+[spacer]
+# this simply adds an small space between the two tracks.
+
+[gtf collapsed]
+file = /Users/wrosikie/Desktop/CodexTests/exampleInputData/gencode.v31.annotation.gtf.gz
+height = 4
+title = Annotation
+merge_transcripts = true
+prefered_name = gene_name
+fontsize = 12
+file_type = gtf
+```
+
+Plot the pyGenomeTracks file with signal enrichment heatmap from command line
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+```
+python -m pygenometracks.plotTracks \
+--tracks /Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_tracks.ini \
+  --region chr12:6527080-6544719 \
+  --outFileName /Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_heatmap2.pdf \
+  --width 20
+```
+
+Plot the pyGenomeTracks file with signal enrichment heatmap from Python itself
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+```
+from pygenometracks.plotTracks import main
+main([
+   '--tracks', '/Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_tracks.ini',
+   '--region', 'chr12:6527080-6544719',
+   '--outFileName', '/Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_heatmap.pdf',
+   '--width', '20',
+])
+```
 * [Citation](#citation)
 * [Documentation](#documentation)
 * [External users](#external-users)

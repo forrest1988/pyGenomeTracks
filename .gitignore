@@ -1,5 +1,13 @@
 *.py[cod]
 .python-version
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # C extensions
 *.so

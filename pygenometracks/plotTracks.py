@@ -303,3 +303,8 @@ def main(args=None):
                                decreasing_x_axis=args.decreasingXAxis)
         plt.close(current_fig)
     trp.close_files()
+
+
+if __name__ == "__main__":
+    # Allow execution via `python -m pygenometracks.plotTracks`
+    main()
