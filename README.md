@@ -77,7 +77,7 @@ Example ini file content with the enrichment heatmap panel
 
 ```
 [EnrichmentHeatmap]
-file = /Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_heatmap.tsv
+file = ......./exampleInputData/enrichment_heatmap.tsv
 file_type = enrichment_heatmap
 title = Enrichment across samples
 sortRegions = descend
@@ -98,7 +98,7 @@ dataType = enrichment    # enrichment, wgbs01, wgbs0100
 # this simply adds an small space between the two tracks.
 
 [gtf collapsed]
-file = /Users/wrosikie/Desktop/CodexTests/exampleInputData/gencode.v31.annotation.gtf.gz
+file = ......../exampleInputData/gencode.v31.annotation.gtf.gz
 height = 4
 title = Annotation
 merge_transcripts = true
@@ -112,9 +112,9 @@ Plot the pyGenomeTracks file with signal enrichment heatmap from command line
 
 ```
 python -m pygenometracks.plotTracks \
---tracks /Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_tracks.ini \
+--tracks ......./exampleInputData/enrichment_tracks.ini \
   --region chr12:6527080-6544719 \
-  --outFileName /Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_heatmap2.pdf \
+  --outFileName ....../exampleInputData/enrichment_heatmap2.pdf \
   --width 20
 ```
 
@@ -124,9 +124,9 @@ Plot the pyGenomeTracks file with signal enrichment heatmap from Python itself
 ```
 from pygenometracks.plotTracks import main
 main([
-   '--tracks', '/Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_tracks.ini',
+   '--tracks', '......./exampleInputData/enrichment_tracks.ini',
    '--region', 'chr12:6527080-6544719',
-   '--outFileName', '/Users/wrosikie/Desktop/CodexTests/exampleInputData/enrichment_heatmap.pdf',
+   '--outFileName', '....../exampleInputData/enrichment_heatmap.pdf',
    '--width', '20',
 ])
 ```
