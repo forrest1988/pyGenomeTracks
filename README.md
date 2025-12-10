@@ -53,6 +53,7 @@ python -m pip install pybigwig        # needed because BedGraphTrack imports pyB
 python -m pip install scipy           # required for hierarchical clustering
 python -m pip install -e .            # editable install to pick up the custom track
 ```
+After install, the CLI entry points are available: `pyGenomeTracks`, `pgt`, and `prepareEnrichmentHeatmap`.
 
 Preparing the files for enrichment heatmap figure panel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -71,6 +72,36 @@ Additional prepare_enrichment_heatmap.py options:
 - `--nan-to-zero`: replace NaNs with 0 (leave off for WGBS so NaNs render as grey).
 - Sorting: `--sort-by` supports `input`, `mean_desc/asc`, `max_desc/asc`, `min_desc/asc`, `metadata:<column>`.
 - Metadata: `--metadata` to attach columns by sample name; `--sample-labels` to override labels.
+
+prepareEnrichmentHeatmap.py help (available after install):
+
+```
+usage: prepareEnrichmentHeatmap.py [-h] -b BIGWIGS [BIGWIGS ...] -r REGION [-o OUTPUT] [--bin-size BIN_SIZE] [--number-of-bins NUMBER_OF_BINS] [--summary-method {mean,average,max,min,stdev,dev,coverage,cov,sum}]
+                                   [--nan-to-zero] [--metadata METADATA] [--sample-labels SAMPLE_LABELS] [--sort-by SORT_BY] [--dataType {enrichment,wgbs01,wgbs0100}]
+
+Prepare a TSV matrix for the EnrichmentHeatmap track by binning multiple bigWig files over a single region.
+
+options:
+  -h, --help            show this help message and exit
+  -b BIGWIGS [BIGWIGS ...], --bigwigs BIGWIGS [BIGWIGS ...]
+                        Space separated list of bigWig files to include.
+  -r REGION, --region REGION
+                        Genomic region to extract, format chr:start-end.
+  -o OUTPUT, --output OUTPUT
+                        Output TSV file.
+  --bin-size BIN_SIZE   Bin size in bases.
+  --number-of-bins NUMBER_OF_BINS
+                        Total number of bins to use.
+  --summary-method {mean,average,max,min,stdev,dev,coverage,cov,sum}
+                        pyBigWig summary method.
+  --nan-to-zero         Replace missing values with zeros.
+  --metadata METADATA   Optional TSV with a 'sample' column to attach metadata to each bigWig.
+  --sample-labels SAMPLE_LABELS
+                        Optional comma-separated labels matching the --bigwigs order.
+  --sort-by SORT_BY     How to sort rows of the output matrix. Options: input, mean_desc, mean_asc, max_desc, max_asc, metadata:<column>.
+  --dataType {enrichment,wgbs01,wgbs0100}
+                        Data type: enrichment (default), wgbs01 (values 0-1), wgbs0100 (values 0-100).
+```
 
 Example ini file content with the enrichment heatmap panel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -92,7 +123,11 @@ outFileSortedSamples = none
 outFileNameMatrix = none
 zMin = auto
 zMax = auto
+autoZMinPercentile = 1   # used when zMin=auto
+autoZMaxPercentile = 98  # used when zMax=auto
 dataType = enrichment    # enrichment, wgbs01, wgbs0100
+missingDataAsZero = true
+missingDataColor = #ffffff
 
 [spacer]
 # this simply adds an small space between the two tracks.

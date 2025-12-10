@@ -36,6 +36,7 @@ dependencies = [
 make_tracks_file = "pygenometracks.makeTracksFile:main"
 pyGenomeTracks = "pygenometracks.plotTracks:main"
 pgt = "pygenometracks.plotTracks:main"
+prepareEnrichmentHeatmap = "pygenometracks.prepareEnrichmentHeatmap:main"
 
 [project.urls]
 Homepage = "https://github.com/deeptools/pyGenomeTracks"

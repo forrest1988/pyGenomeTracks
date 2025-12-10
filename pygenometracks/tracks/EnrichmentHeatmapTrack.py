@@ -8,6 +8,7 @@ from .. utilities import InputError
 DEFAULT_COLORMAP = 'viridis'
 WGBS_BAD_COLOR = '#c0c5ce'
 WGBS_COLORS = ['#fbcb5a', '#000000']
+DEFAULT_MISSING_COLOR = '#ffffff'
 
 
 class EnrichmentHeatmapTrack(GenomeTrack):
@@ -69,7 +70,11 @@ dataType = enrichment
                            'outFileNameMatrix': 'none',
                            'zMin': 'auto',
                            'zMax': 'auto',
-                           'dataType': 'enrichment'}
+                           'autoZMinPercentile': 1,
+                           'autoZMaxPercentile': 98,
+                           'dataType': 'enrichment',
+                           'missingDataColor': DEFAULT_MISSING_COLOR,
+                           'missingDataAsZero': True}
     NECESSARY_PROPERTIES = ['file']
     SYNONYMOUS_PROPERTIES = {'max_value': {'auto': None},
                              'min_value': {'auto': None},
@@ -77,22 +82,28 @@ dataType = enrichment
     POSSIBLE_PROPERTIES = {'sortRegions': ['descend', 'ascend', 'keep', 'no'],
                            'sortUsing': ['mean', 'median', 'max', 'min', 'sum', 'region_length'],
                            'orientation': [None, 'inverted'],
-                           'clustering': ['none', 'hclust', 'kmeans'],
-                           'dataType': ['enrichment', 'wgbs01', 'wgbs0100']}
+                          'clustering': ['none', 'hclust', 'kmeans'],
+                          'dataType': ['enrichment', 'wgbs01', 'wgbs0100']}
     BOOLEAN_PROPERTIES = ['labels', 'rasterize', 'nans_to_zeros',
-                          'show_colorbar']
+                          'show_colorbar', 'missingDataAsZero']
     STRING_PROPERTIES = ['file', 'file_type', 'overlay_previous',
                          'title', 'colormap', 'sortRegions', 'sortUsing',
                          'orientation', 'clustering', 'outFileSortedSamples',
                          'outFileNameMatrix', 'zMin', 'zMax', 'dataType',
+                         'autoZMinPercentile', 'autoZMaxPercentile',
+                         'missingDataColor',
                          # lowercase variants (configparser lowercases keys)
                          'sortregions', 'sortusing',
                          'outfilesortedsamples', 'outfilenamematrix',
-                         'zmin', 'zmax', 'datatype']
+                         'zmin', 'zmax', 'datatype',
+                         'autozminpercentile', 'autozmaxpercentile',
+                         'missingdatacolor']
     FLOAT_PROPERTIES = {'max_value': [- np.inf, np.inf],
                         'min_value': [- np.inf, np.inf],
                         'label_fontsize': [0, np.inf],
-                        'height': [0, np.inf]}
+                        'height': [0, np.inf],
+                        'autoZMinPercentile': [0, 100],
+                        'autoZMaxPercentile': [0, 100]}
     INTEGER_PROPERTIES = {'clusterNumber': [1, np.inf],
                           'clusternumber': [1, np.inf]}
 
@@ -119,6 +130,12 @@ dataType = enrichment
         if self.properties['dataType'].startswith('wgbs') and self.properties['nans_to_zeros']:
             self.log.warning("nans_to_zeros is disabled for wgbs dataType to preserve missing-context NaNs.")
             self.properties['nans_to_zeros'] = False
+        # sync missingDataAsZero with nans_to_zeros
+        if self.properties['dataType'].startswith('wgbs') and self.properties['missingDataAsZero']:
+            self.log.warning("missingDataAsZero is disabled for wgbs dataType to preserve missing-context NaNs.")
+            self.properties['missingDataAsZero'] = False
+        if self.properties['missingDataAsZero']:
+            self.properties['nans_to_zeros'] = True
         self.process_color('colormap', colormap_possible=True,
                            colormap_only=True, default_value_is_colormap=True)
         self.cmap = cm.get_cmap(self.properties['colormap'])
@@ -133,7 +150,9 @@ dataType = enrichment
             'outfilenamematrix': 'outFileNameMatrix',
             'zmin': 'zMin',
             'zmax': 'zMax',
-            'datatype': 'dataType'
+            'datatype': 'dataType',
+            'autozminpercentile': 'autoZMinPercentile',
+            'autozmaxpercentile': 'autoZMaxPercentile'
         }
         synonyms = {'ascending': 'ascend', 'descending': 'descend'}
         for low, proper in mapping.items():
@@ -202,7 +221,9 @@ dataType = enrichment
             matrix_rows.append(numeric_vals)
 
         self.matrix = np.array(matrix_rows, dtype=float)
-        if self.properties['nans_to_zeros'] and np.any(np.isnan(self.matrix)):
+        if self.properties['missingDataAsZero'] and np.any(np.isnan(self.matrix)):
+            self.matrix = np.nan_to_num(self.matrix, nan=0.0)
+        elif self.properties['nans_to_zeros'] and np.any(np.isnan(self.matrix)):
             self.matrix = np.nan_to_num(self.matrix, nan=0.0)
 
         self.matrix, self.sample_labels, self.metadata_rows = \
@@ -407,10 +428,12 @@ dataType = enrichment
         vmax = self.properties.get('max_value', None)
         zmin_prop = self.properties.get('zMin', 'auto')
         zmax_prop = self.properties.get('zMax', 'auto')
+        auto_zmin_pct = self.properties.get('autoZMinPercentile', 1)
+        auto_zmax_pct = self.properties.get('autoZMaxPercentile', 98)
 
         if data_type.startswith('wgbs'):
             cmap = mcolors.LinearSegmentedColormap.from_list('wgbs', WGBS_COLORS)
-            cmap.set_bad(WGBS_BAD_COLOR)
+            cmap.set_bad(self.properties.get('missingDataColor', WGBS_BAD_COLOR))
             if zmin_prop == 'auto':
                 vmin = 0
             else:
@@ -427,12 +450,20 @@ dataType = enrichment
                     vmax = 1 if data_type == 'wgbs01' else 100
         else:
             cmap = self.cmap
-            vmin = self._coerce_z_value(zmin_prop, data, fallback=self.properties.get('min_value'))
-            vmax = self._coerce_z_value(zmax_prop, data, fallback=self.properties.get('max_value'), upper=True)
+            try:
+                cmap.set_bad(self.properties.get('missingDataColor', DEFAULT_MISSING_COLOR))
+            except Exception:
+                pass
+            vmin = self._coerce_z_value(zmin_prop, data,
+                                        fallback=self.properties.get('min_value'),
+                                        percentile=auto_zmin_pct, upper=False)
+            vmax = self._coerce_z_value(zmax_prop, data,
+                                        fallback=self.properties.get('max_value'),
+                                        percentile=auto_zmax_pct, upper=True)
         return cmap, vmin, vmax
 
     @staticmethod
-    def _coerce_z_value(val, data, fallback=None, upper=False):
+    def _coerce_z_value(val, data, fallback=None, upper=False, percentile=98):
         if val is None:
             return fallback
         if isinstance(val, (int, float)):
@@ -441,7 +472,11 @@ dataType = enrichment
             sval = val.strip()
             if sval.lower() == 'auto':
                 try:
-                    candidate = float(np.nanmax(data)) if upper else float(np.nanmin(data))
+                    perc = float(percentile)
+                except Exception:
+                    perc = 98 if upper else 1
+                try:
+                    candidate = float(np.nanpercentile(data, perc))
                     if np.isnan(candidate):
                         raise ValueError("nan percentile")
                     return candidate
